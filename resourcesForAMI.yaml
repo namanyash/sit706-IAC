@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Creates an EC2 instance"
+Parameters:
+  InstanceType:
+    Description: "EC2 instance type"
+    Type: "String"
+    Default: t2.micro
+
+  S3BucketName:
+    Description: "Unique name for S3 bucket"
+    Type: "String"
+    Default: "task6-naman-bucket"
+
+  AMIId:
+    Description: Region specific image from the Parameter Store
+    Type: "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>"
+    Default: "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2"
+
+Resources:
+  InstanceSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupName: ami-web-server-sg
+      VpcId: !ImportValue task6-cfn-vpc-id
+      GroupDescription: "Allow HTTPS to port 443"
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0 ## HTTP rule
+          FromPort: 80
+          IpProtocol: "tcp"
+          ToPort: 80
+        - CidrIp: 0.0.0.0/0 ## SSH rule
+          FromPort: 22
+          IpProtocol: "tcp"
+          ToPort: 22
+
+  AMIEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      IamInstanceProfile: LabInstanceProfile
+      InstanceType: !Ref InstanceType
+      SecurityGroupIds:
+        - !Ref InstanceSecurityGroup
+      ImageId: !Ref AMIId
+      Tags:
+        - Key: "Name"
+          Value: "ami-web-server-cfn"
+      SubnetId: !ImportValue task6-cfn-public-subnet-a-id
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          yum -y update
+          yum -y install php httpd mysql
+          PHP_VERSION=`php -v | head -n 1 | awk '{print $2}' | awk -F "." '{print $1}'`
+          while [ ${PHP_VERSION} -ne 7 ]
+          do
+          amazon-linux-extras install php7.4 -y
+          PHP_VERSION=`php -v | head -n 1 | awk '{print $2}' | awk -F "." '{print $1}'`
+          done
+          yum -y install php-mbstring php-xml
+          wget http://wordpress.org/latest.tar.gz -P /tmp/
+          tar zxvf /tmp/latest.tar.gz -C /tmp
+          cp -r /tmp/wordpress/* /var/www/html/
+          chown apache:apache -R /var/www/html
+          systemctl enable httpd.service
+          systemctl start httpd.service
+
+  S3Bucket:
+    Type: "AWS::S3::Bucket"
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Ref S3BucketName
+
+Outputs:
+  InstanceId:
+    Description: "InstanceId of the newly created EC2 instance"
+    Value: !Ref AMIEC2Instance
+  S3Bucket:
+    Description: "S3 bucket created for the application"
+    Value: !Ref S3Bucket
